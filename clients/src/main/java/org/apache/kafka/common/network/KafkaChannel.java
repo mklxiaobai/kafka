@@ -221,7 +221,9 @@ public class KafkaChannel implements AutoCloseable {
         if (socketChannel != null) {
             remoteAddress = socketChannel.getRemoteAddress();
         }
+        // 注册read事件
         boolean connected = transportLayer.finishConnect();
+        // 更改连接状态
         if (connected) {
             if (ready()) {
                 state = ChannelState.READY;

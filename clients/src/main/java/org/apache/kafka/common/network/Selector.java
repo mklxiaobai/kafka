@@ -102,11 +102,14 @@ public class Selector implements Selectable, AutoCloseable {
     }
 
     private final Logger log;
+    // jdk的Selector
     private final java.nio.channels.Selector nioSelector;
+    // 保存和每个节点的channel连接
     private final Map<String, KafkaChannel> channels;
     private final Set<KafkaChannel> explicitlyMutedChannels;
     private boolean outOfMemory;
     private final List<Send> completedSends;
+    // 接受到的响应
     private final LinkedHashMap<String, NetworkReceive> completedReceives;
     private final Set<SelectionKey> immediatelyConnectedKeys;
     private final Map<String, KafkaChannel> closingChannels;
@@ -462,6 +465,7 @@ public class Selector implements Selectable, AutoCloseable {
 
         /* check ready keys */
         long startSelect = time.nanoseconds();
+        // 获得key事件的数量
         int numReadyKeys = select(timeout);
         long endSelect = time.nanoseconds();
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
@@ -478,6 +482,7 @@ public class Selector implements Selectable, AutoCloseable {
             }
 
             // Poll from channels where the underlying socket has more data
+            // 处理SelectKey事件
             pollSelectionKeys(readyKeys, false, endSelect);
             // Clear all selected keys so that they are included in the ready count for the next select
             readyKeys.clear();
@@ -510,6 +515,7 @@ public class Selector implements Selectable, AutoCloseable {
                            boolean isImmediatelyConnected,
                            long currentTimeNanos) {
         for (SelectionKey key : determineHandlingOrder(selectionKeys)) {
+            // 从key中获取channel
             KafkaChannel channel = channel(key);
             long channelStartTimeNanos = recordTimePerConnection ? time.nanoseconds() : 0;
             boolean sendFailed = false;
@@ -522,7 +528,9 @@ public class Selector implements Selectable, AutoCloseable {
 
             try {
                 /* complete any connections that have finished their handshake (either normally or immediately) */
+                // 处理connect事件
                 if (isImmediatelyConnected || key.isConnectable()) {
+                    // 完成网络的连接
                     if (channel.finishConnect()) {
                         this.connected.add(nodeId);
                         this.sensors.connectionCreated.record();
@@ -571,6 +579,7 @@ public class Selector implements Selectable, AutoCloseable {
 
                 //if channel is ready and has bytes to read from socket or buffer, and has no
                 //previous completed receive then read from it
+                // 处理read事件
                 if (channel.ready() && (key.isReadable() || channel.hasBytesBuffered()) && !hasCompletedReceive(channel)
                         && !explicitlyMutedChannels.contains(channel)) {
                     attemptRead(channel);
@@ -589,6 +598,7 @@ public class Selector implements Selectable, AutoCloseable {
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
 
                 long nowNanos = channelStartTimeNanos != 0 ? channelStartTimeNanos : currentTimeNanos;
+                // 执行write事件
                 try {
                     attemptWrite(key, channel, nowNanos);
                 } catch (Exception e) {
@@ -641,6 +651,7 @@ public class Selector implements Selectable, AutoCloseable {
     // package-private for testing
     void write(KafkaChannel channel) throws IOException {
         String nodeId = channel.id();
+        // 把byteBuffer写入channel
         long bytesSent = channel.write();
         Send send = channel.maybeCompleteSend();
         // We may complete the send with bytesSent < 1 if `TransportLayer.hasPendingWrites` was true and `channel.write()`
@@ -650,6 +661,7 @@ public class Selector implements Selectable, AutoCloseable {
             if (bytesSent > 0)
                 this.sensors.recordBytesSent(nodeId, bytesSent, currentTimeMs);
             if (send != null) {
+                // 把请求体放到completedSends集合c
                 this.completedSends.add(send);
                 this.sensors.recordCompletedSend(nodeId, send.size(), currentTimeMs);
             }
@@ -671,6 +683,7 @@ public class Selector implements Selectable, AutoCloseable {
     private void attemptRead(KafkaChannel channel) throws IOException {
         String nodeId = channel.id();
 
+        // 执行读取操作
         long bytesReceived = channel.read();
         if (bytesReceived != 0) {
             long currentTimeMs = time.milliseconds();
@@ -679,6 +692,7 @@ public class Selector implements Selectable, AutoCloseable {
 
             NetworkReceive receive = channel.maybeCompleteReceive();
             if (receive != null) {
+                // 添加到completedReceives
                 addToCompletedReceives(channel, receive, currentTimeMs);
             }
         }

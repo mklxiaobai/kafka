@@ -444,6 +444,12 @@ public class NetworkClient implements KafkaClient {
      * @param now the current timestamp
      */
     private boolean canSendRequest(String node, long now) {
+        /**
+         * 同时满足3个条件才能发送
+         * 1. 网路状态已建立
+         * 2. channel已建立
+         * 3. 已发送未接受响应的消息数量 不能超过限制
+         */
         return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
             inFlightRequests.canSendMore(node);
     }
@@ -520,6 +526,7 @@ public class NetworkClient implements KafkaClient {
                 clientRequest.apiKey(), header, clientRequest.requestTimeoutMs(), destination, request);
         }
         Send send = request.toSend(destination, header);
+        // 添加到InFlightRequest中
         InFlightRequest inFlightRequest = new InFlightRequest(
                 clientRequest,
                 header,
@@ -552,7 +559,7 @@ public class NetworkClient implements KafkaClient {
             completeResponses(responses);
             return responses;
         }
-
+        // 元数据是否需要更新
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             this.selector.poll(Utils.min(timeout, metadataTimeout, defaultRequestTimeoutMs));
@@ -563,13 +570,17 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
+        // 处理已接受到响应的请求
         handleCompletedSends(responses, updatedNow);
+        // 将Receives 转换成responses
         handleCompletedReceives(responses, updatedNow);
+        // 处理断开连接响应
         handleDisconnections(responses, updatedNow);
         handleConnections();
         handleInitiateApiVersionRequests(updatedNow);
         handleTimedOutConnections(responses, updatedNow);
         handleTimedOutRequests(responses, updatedNow);
+        // 处理Responses
         completeResponses(responses);
 
         return responses;
@@ -831,8 +842,11 @@ public class NetworkClient implements KafkaClient {
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // if no response is expected then when the send is completed, return it
+        // 遍历已完成的Send
         for (Send send : this.selector.completedSends()) {
+            // 从inFlightRequests获取一个请求
             InFlightRequest request = this.inFlightRequests.lastSent(send.destination());
+            // 如果request需要获取响应
             if (!request.expectResponse) {
                 this.inFlightRequests.completeLastSent(send.destination());
                 responses.add(request.completed(null, now));
@@ -869,6 +883,7 @@ public class NetworkClient implements KafkaClient {
             String source = receive.source();
             InFlightRequest req = inFlightRequests.completeNext(source);
 
+            // 将receive转换成response
             AbstractResponse response = parseResponse(receive.payload(), req.header);
             if (throttleTimeSensor != null) {
                 throttleTimeSensor.record(response.throttleTimeMs());
@@ -881,11 +896,13 @@ public class NetworkClient implements KafkaClient {
 
             // If the received response includes a throttle delay, throttle the connection.
             maybeThrottle(response, req.header.apiVersion(), req.destination, now);
+            // 如果是MetadataResponse
             if (req.isInternalRequest && response instanceof MetadataResponse)
                 metadataUpdater.handleSuccessfulResponse(req.header, now, (MetadataResponse) response);
             else if (req.isInternalRequest && response instanceof ApiVersionsResponse)
                 handleApiVersionsResponse(responses, req, now, (ApiVersionsResponse) response);
             else
+                // 处理一般的响应
                 responses.add(req.completed(response, now));
         }
     }
@@ -1033,6 +1050,7 @@ public class NetworkClient implements KafkaClient {
 
             // Beware that the behavior of this method and the computation of timeouts for poll() are
             // highly dependent on the behavior of leastLoadedNode.
+            // 获取最空闲的Node
             Node node = leastLoadedNode(now);
             if (node == null) {
                 log.debug("Give up sending metadata request since no node is available");

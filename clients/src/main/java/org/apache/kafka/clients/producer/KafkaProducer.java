@@ -241,21 +241,30 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     private final String clientId;
     // Visible for testing
+    // 统计器
     final Metrics metrics;
+    // 分区器
     private final Partitioner partitioner;
+    // 请求的最大大小 默认1M
     private final int maxRequestSize;
+    // buffer内存总大小 默认32M
     private final long totalMemorySize;
+    // 元数据
     private final ProducerMetadata metadata;
+    // 累加器
     private final RecordAccumulator accumulator;
+    // 发送线程
     private final Sender sender;
     private final Thread ioThread;
     private final CompressionType compressionType;
     private final Sensor errors;
     private final Time time;
+    // 序列化器
     private final Serializer<K> keySerializer;
     private final Serializer<V> valueSerializer;
     private final ProducerConfig producerConfig;
     private final long maxBlockTimeMs;
+    // 拦截器
     private final ProducerInterceptors<K, V> interceptors;
     private final ApiVersions apiVersions;
     private final TransactionManager transactionManager;
@@ -330,12 +339,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         ProducerConfig config = new ProducerConfig(ProducerConfig.appendSerializerToConfig(configs, keySerializer,
                 valueSerializer));
         try {
+            // 用户自定义参数
             Map<String, Object> userProvidedConfigs = config.originals();
             this.producerConfig = config;
             this.time = time;
 
             String transactionalId = (String) userProvidedConfigs.get(ProducerConfig.TRANSACTIONAL_ID_CONFIG);
 
+            // 客户端id
             this.clientId = config.getString(ProducerConfig.CLIENT_ID_CONFIG);
 
             LogContext logContext;
@@ -346,6 +357,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             log = logContext.logger(KafkaProducer.class);
             log.trace("Starting the Kafka producer");
 
+            // 统计器
             Map<String, String> metricTags = Collections.singletonMap("client-id", clientId);
             MetricConfig metricConfig = new MetricConfig().samples(config.getInt(ProducerConfig.METRICS_NUM_SAMPLES_CONFIG))
                     .timeWindow(config.getLong(ProducerConfig.METRICS_SAMPLE_WINDOW_MS_CONFIG), TimeUnit.MILLISECONDS)
@@ -360,8 +372,11 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             MetricsContext metricsContext = new KafkaMetricsContext(JMX_PREFIX,
                     config.originalsWithPrefix(CommonClientConfigs.METRICS_CONTEXT_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time, metricsContext);
+            // 初始化分区器
             this.partitioner = config.getConfiguredInstance(ProducerConfig.PARTITIONER_CLASS_CONFIG, Partitioner.class);
+            // 消息重试时间间隔 默认100ms
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
+            // 初始化key的序列化器
             if (keySerializer == null) {
                 this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                                                                                          Serializer.class);
@@ -370,6 +385,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 config.ignore(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG);
                 this.keySerializer = keySerializer;
             }
+            // 初始化value的序列化器
             if (valueSerializer == null) {
                 this.valueSerializer = config.getConfiguredInstance(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                                                                                            Serializer.class);
@@ -382,6 +398,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // load interceptors and make sure they get clientId
             userProvidedConfigs.put(ProducerConfig.CLIENT_ID_CONFIG, clientId);
             ProducerConfig configWithClientId = new ProducerConfig(userProvidedConfigs, false);
+            // 初始化拦截器 默认没有
             List<ProducerInterceptor<K, V>> interceptorList = (List) configWithClientId.getConfiguredInstances(
                     ProducerConfig.INTERCEPTOR_CLASSES_CONFIG, ProducerInterceptor.class);
             if (interceptors != null)
@@ -390,15 +407,21 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.interceptors = new ProducerInterceptors<>(interceptorList);
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer,
                     valueSerializer, interceptorList, reporters);
+            // 最大请求的大小 默认1M
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            // 内存池最大大小
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
+            // 压缩格式
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
-
+            // 内存池耗尽时等待阻塞的最大时间 默认60s
             this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+            // 发送和重试消息的最大时间间隔
             int deliveryTimeoutMs = configureDeliveryTimeout(config, log);
 
             this.apiVersions = new ApiVersions();
+            // 事务管理器
             this.transactionManager = configureTransactionState(config, logContext);
+            // 初始化累加器
             this.accumulator = new RecordAccumulator(logContext,
                     config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.compressionType,
@@ -418,6 +441,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             if (metadata != null) {
                 this.metadata = metadata;
             } else {
+                // 初始化元数据对象  这时候还没有拉取元数据
                 this.metadata = new ProducerMetadata(retryBackoffMs,
                         config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG),
                         config.getLong(ProducerConfig.METADATA_MAX_IDLE_CONFIG),
@@ -427,9 +451,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.metadata.bootstrap(addresses);
             }
             this.errors = this.metrics.sensor("errors");
+            // 初始化Sender线程
             this.sender = newSender(logContext, kafkaClient, this.metadata);
             String ioThreadName = NETWORK_THREAD_PREFIX + " | " + clientId;
+
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
+            // 启动Sender线程
             this.ioThread.start();
             config.logUnused();
             AppInfoParser.registerAppInfo(JMX_PREFIX, clientId, metrics, time.milliseconds());
@@ -878,6 +905,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         // intercept the record, which can be potentially modified; this method does not throw exceptions
+        // 调用拦截器的方法拦截 这一步默认不处理
         ProducerRecord<K, V> interceptedRecord = this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
     }
@@ -900,6 +928,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long nowMs = time.milliseconds();
             ClusterAndWaitTime clusterAndWaitTime;
             try {
+                /**
+                 * 步骤一：同步拉取元数据
+                 */
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), nowMs, maxBlockTimeMs);
             } catch (KafkaException e) {
                 if (metadata.isClosed())
@@ -910,6 +941,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long remainingWaitMs = Math.max(0, maxBlockTimeMs - clusterAndWaitTime.waitedOnMetadataMs);
             Cluster cluster = clusterAndWaitTime.cluster;
             byte[] serializedKey;
+            /**
+             * 步骤二：对key和value进行序列化
+             */
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.headers(), record.key());
             } catch (ClassCastException cce) {
@@ -925,25 +959,40 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer", cce);
             }
+            /**
+             * 步骤三：使用分区器选择需要发送的分区
+             */
             int partition = partition(record, serializedKey, serializedValue, cluster);
             tp = new TopicPartition(record.topic(), partition);
 
             setReadOnly(record.headers());
             Header[] headers = record.headers().toArray();
 
+            // 获取要发送消息的大小
             int serializedSize = AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
                     compressionType, serializedKey, serializedValue, headers);
+
+            /**
+             * 步骤四：检查消息大小是否超过限制
+             */
             ensureValidRecordSize(serializedSize);
             long timestamp = record.timestamp() == null ? nowMs : record.timestamp();
             if (log.isTraceEnabled()) {
                 log.trace("Attempting to append record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             }
             // producer callback will make sure to call both 'callback' and interceptor callback
+            /**
+             * 步骤五： 封装回调函数
+             */
             Callback interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
 
             if (transactionManager != null && transactionManager.isTransactional()) {
                 transactionManager.failIfNotReadyForSend();
             }
+            /**
+             * 步骤六： 把消息添加到累加器中
+             * 这一步abortOnNewBatch为true
+             */
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, true, nowMs);
 
@@ -951,6 +1000,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 int prevPartition = partition;
                 partitioner.onNewBatch(record.topic(), cluster, prevPartition);
                 partition = partition(record, serializedKey, serializedValue, cluster);
+                // 创建TopicPartition
                 tp = new TopicPartition(record.topic(), partition);
                 if (log.isTraceEnabled()) {
                     log.trace("Retrying append due to new batch creation for topic {} partition {}. The old partition was {}", record.topic(), partition, prevPartition);
@@ -958,6 +1008,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 // producer callback will make sure to call both 'callback' and interceptor callback
                 interceptCallback = new InterceptorCallback<>(callback, this.interceptors, tp);
 
+                // 这一步abortOnNewBatch为false
                 result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, false, nowMs);
             }
@@ -965,6 +1016,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             if (transactionManager != null && transactionManager.isTransactional())
                 transactionManager.maybeAddPartitionToTransaction(tp);
 
+            /**
+             * 步骤七： 唤醒Sender线程的Selector
+             */
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
                 this.sender.wakeup();
@@ -1017,15 +1071,18 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
         if (cluster.invalidTopics().contains(topic))
             throw new InvalidTopicException(topic);
-
+        // 添加topic 检查是否需要更新
         metadata.add(topic, nowMs);
 
+        // 获取主题的分区数  第一次执行返回null
         Integer partitionsCount = cluster.partitionCountForTopic(topic);
         // Return cached metadata if we have it, and if the record's partition is either undefined
         // or within the known partition range
+        // 如果分区数不为空 则直接返回 第一次执行不满足
         if (partitionsCount != null && (partition == null || partition < partitionsCount))
             return new ClusterAndWaitTime(cluster, 0);
 
+        // 设置超时时间
         long remainingWaitMs = maxWaitMs;
         long elapsed = 0;
         // Issue metadata requests until we have metadata for the topic and the requested partition,
@@ -1038,9 +1095,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 log.trace("Requesting metadata update for topic {}.", topic);
             }
             metadata.add(topic, nowMs + elapsed);
+            // 拿到当前元数据版本号
             int version = metadata.requestUpdateForTopic(topic);
+            // 唤醒selector
             sender.wakeup();
             try {
+                // 等待更新
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
@@ -1069,10 +1129,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * Validate that the record size isn't too large
      */
     private void ensureValidRecordSize(int size) {
+        // 是否超过消息的最大大小 默认1M
         if (size > maxRequestSize)
             throw new RecordTooLargeException("The message is " + size +
                     " bytes when serialized which is larger than " + maxRequestSize + ", which is the value of the " +
                     ProducerConfig.MAX_REQUEST_SIZE_CONFIG + " configuration.");
+        // 是否超过内存池的最大大小 默认32M
         if (size > totalMemorySize)
             throw new RecordTooLargeException("The message is " + size +
                     " bytes when serialized which is larger than the total memory buffer you have configured with the " +
@@ -1270,6 +1332,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey, byte[] serializedValue, Cluster cluster) {
         Integer partition = record.partition();
+        // 调用分区器分区
         return partition != null ?
                 partition :
                 partitioner.partition(

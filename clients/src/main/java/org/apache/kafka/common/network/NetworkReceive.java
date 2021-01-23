@@ -91,11 +91,14 @@ public class NetworkReceive implements Receive {
 
     public long readFrom(ScatteringByteChannel channel) throws IOException {
         int read = 0;
+        // 如果byteBuffer还有空间剩余
         if (size.hasRemaining()) {
+            // 从channel读数据到缓冲区
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;
+            // 读到这个byteBuffer没有空间剩余 但是channel中的数据还没有读完
             if (!size.hasRemaining()) {
                 size.rewind();
                 int receiveSize = size.getInt();

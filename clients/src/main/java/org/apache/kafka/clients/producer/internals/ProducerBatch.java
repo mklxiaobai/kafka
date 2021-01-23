@@ -63,6 +63,7 @@ public final class ProducerBatch {
     final TopicPartition topicPartition;
     final ProduceRequestResult produceFuture;
 
+    // 每个thunk代表一个消息
     private final List<Thunk> thunks = new ArrayList<>();
     private final MemoryRecordsBuilder recordsBuilder;
     private final AtomicInteger attempts = new AtomicInteger(0);
@@ -70,6 +71,7 @@ public final class ProducerBatch {
     private final AtomicReference<FinalState> finalState = new AtomicReference<>(null);
 
     int recordCount;
+    // batch的大小 默认1.6K
     int maxRecordSize;
     private long lastAttemptMs;
     private long lastAppendTime;
@@ -101,9 +103,11 @@ public final class ProducerBatch {
      * @return The RecordSend corresponding to this record or null if there isn't sufficient room.
      */
     public FutureRecordMetadata tryAppend(long timestamp, byte[] key, byte[] value, Header[] headers, Callback callback, long now) {
+        // 检查是否还有空间
         if (!recordsBuilder.hasRoomFor(timestamp, key, value, headers)) {
             return null;
         } else {
+            // 写入OutPutStream
             Long checksum = this.recordsBuilder.append(timestamp, key, value, headers);
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
@@ -115,6 +119,7 @@ public final class ProducerBatch {
                                                                    Time.SYSTEM);
             // we have to keep every future returned to the users in case the batch needs to be
             // split to several new batches and resent.
+            // 一个thunk对应一条消息
             thunks.add(new Thunk(callback, future));
             this.recordCount++;
             return future;
@@ -194,6 +199,7 @@ public final class ProducerBatch {
         }
 
         if (this.finalState.compareAndSet(null, tryFinalState)) {
+            // 执行回调
             completeFutureAndFireCallbacks(baseOffset, logAppendTime, exception);
             return true;
         }

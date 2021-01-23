@@ -444,6 +444,7 @@ public final class LegacyRecord {
 
     // Write a record to the buffer, if the record's compression type is none, then
     // its value payload should be already compressed with the specified type
+    // 将key和value写入DataOutputStream
     private static void write(DataOutputStream out,
                               byte magic,
                               long crc,

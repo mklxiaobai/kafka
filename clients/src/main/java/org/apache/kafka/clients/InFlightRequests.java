@@ -86,6 +86,7 @@ final class InFlightRequests {
      * @return The request
      */
     public NetworkClient.InFlightRequest completeLastSent(String node) {
+        // 从inFlightRequests中弹出
         NetworkClient.InFlightRequest inFlightRequest = requestQueue(node).pollFirst();
         inFlightRequestCount.decrementAndGet();
         return inFlightRequest;

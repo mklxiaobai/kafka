@@ -422,6 +422,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
                 appendDefaultRecord(offset, timestamp, key, value, headers);
                 return null;
             } else {
+                // 写入
                 return appendLegacyRecord(offset, timestamp, key, value, magic);
             }
         } catch (IOException e) {
@@ -710,6 +711,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
         if (timestampType == TimestampType.LOG_APPEND_TIME)
             timestamp = logAppendTime;
+        // 写入outPutStream
         long crc = LegacyRecord.write(appendStream, magic, timestamp, key, value, CompressionType.NONE, timestampType);
         recordWritten(offset, timestamp, size + Records.LOG_OVERHEAD);
         return crc;

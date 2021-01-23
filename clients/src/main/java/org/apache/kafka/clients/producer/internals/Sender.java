@@ -184,11 +184,13 @@ public class Sender implements Runnable {
                 Iterator<ProducerBatch> iter = partitionInFlightBatches.iterator();
                 while (iter.hasNext()) {
                     ProducerBatch batch = iter.next();
+                    // 检查batch是否过期
                     if (batch.hasReachedDeliveryTimeout(accumulator.getDeliveryTimeoutMs(), now)) {
                         iter.remove();
                         // expireBatches is called in Sender.sendProducerData, before client.poll.
                         // The !batch.isDone() invariant should always hold. An IllegalStateException
                         // exception will be thrown if the invariant is violated.
+                        // 如果batch并没有执行过回调
                         if (!batch.isDone()) {
                             expiredBatches.add(batch);
                         } else {
@@ -295,6 +297,7 @@ public class Sender implements Runnable {
      *
      */
     void runOnce() {
+        // 事务相关
         if (transactionManager != null) {
             try {
                 transactionManager.maybeResolveSequences();
@@ -323,16 +326,21 @@ public class Sender implements Runnable {
         }
 
         long currentTimeMs = time.milliseconds();
+        // 核心方法
         long pollTimeout = sendProducerData(currentTimeMs);
+        // 执行网络IO
         client.poll(pollTimeout, currentTimeMs);
     }
 
     private long sendProducerData(long now) {
+        // 获取集群元数据
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        // 获取需要发送的leader节点，如果没有找到unknownLeaderTopics中添加该主题
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
+        // 如果有主题元数据没有更新 则设置needUpdate为true 下一次NetworkClient会去拉取元数据
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
             // topics which may have expired. Add the topic again to metadata to ensure it is included
@@ -350,6 +358,7 @@ public class Sender implements Runnable {
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            // 再次检查节点网络连接
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.pollDelayMs(node, now));
@@ -357,7 +366,9 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        // 合并同一个broker的所有Leader分区的ProducerBatch
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
+        // 添加到inFlightBatches中
         addToInflightBatches(batches);
         if (guaranteeMessageOrder) {
             // Mute all the partitions drained
@@ -366,7 +377,7 @@ public class Sender implements Runnable {
                     this.accumulator.mutePartition(batch.topicPartition);
             }
         }
-
+        // 筛选出过期消息并处理
         accumulator.resetNextBatchExpiryTime();
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
@@ -404,6 +415,7 @@ public class Sender implements Runnable {
             // otherwise the select time will be the time difference between now and the metadata expiry time;
             pollTimeout = 0;
         }
+        // 创建请求并发送
         sendProduceRequests(batches, now);
         return pollTimeout;
     }
@@ -552,6 +564,7 @@ public class Sender implements Runnable {
             log.trace("Cancelled request with header {} due to node {} being disconnected",
                 requestHeader, response.destination());
             for (ProducerBatch batch : batches.values())
+                // 如果断开连接的话 回调抛异常
                 completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.NETWORK_EXCEPTION, String.format("Disconnected from node %s", response.destination())),
                         correlationId, now);
         } else if (response.versionMismatch() != null) {
@@ -560,11 +573,13 @@ public class Sender implements Runnable {
             for (ProducerBatch batch : batches.values())
                 completeBatch(batch, new ProduceResponse.PartitionResponse(Errors.UNSUPPORTED_VERSION), correlationId, now);
         } else {
+            // 成功回调
             log.trace("Received produce response from node {} with correlation id {}", response.destination(), correlationId);
             // if we have a response, parse it
             if (response.hasResponse()) {
                 // Sender should exercise PartitionProduceResponse rather than ProduceResponse.PartitionResponse
                 // https://issues.apache.org/jira/browse/KAFKA-10696
+                // 将响应实体包装成ProduceResponse
                 ProduceResponse produceResponse = (ProduceResponse) response.responseBody();
                 produceResponse.data().responses().forEach(r -> r.partitionResponses().forEach(p -> {
                     TopicPartition tp = new TopicPartition(r.name(), p.index());
@@ -660,6 +675,7 @@ public class Sender implements Runnable {
                 metadata.requestUpdate();
             }
         } else {
+            // 执行消息的回调
             completeBatch(batch, response);
         }
 
@@ -712,7 +728,9 @@ public class Sender implements Runnable {
 
         this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
 
+        // 执行批次的完成回调
         if (batch.done(baseOffset, logAppendTime, exception)) {
+            // 从inFlightBacth中删除并释放ByteBuffer缓存
             maybeRemoveAndDeallocateBatch(batch);
         }
     }
@@ -783,18 +801,20 @@ public class Sender implements Runnable {
         if (transactionManager != null && transactionManager.isTransactional()) {
             transactionalId = transactionManager.transactionalId();
         }
-
+        // 开始创建请求
         ProduceRequest.Builder requestBuilder = ProduceRequest.forMagic(minUsedMagic,
                 new ProduceRequestData()
                         .setAcks(acks)
                         .setTimeoutMs(timeout)
                         .setTransactionalId(transactionalId)
                         .setTopicData(tpd));
+        // 此回调是针对请求的 请求完成的回调  跟消息的回调不是一个
         RequestCompletionHandler callback = response -> handleProduceResponse(response, recordsByPartition, time.milliseconds());
 
         String nodeId = Integer.toString(destination);
         ClientRequest clientRequest = client.newClientRequest(nodeId, requestBuilder, now, acks != 0,
                 requestTimeoutMs, callback);
+        // 注册write事件
         client.send(clientRequest, now);
         log.trace("Sent produce request to {}: {}", nodeId, requestBuilder);
     }

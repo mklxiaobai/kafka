@@ -44,21 +44,26 @@ public class StickyPartitionCache {
     }
 
     public int nextPartition(String topic, Cluster cluster, int prevPartition) {
+        // 获取主题的分区集合
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
         Integer oldPart = indexCache.get(topic);
         Integer newPart = oldPart;
         // Check that the current sticky partition for the topic is either not set or that the partition that 
         // triggered the new batch matches the sticky partition that needs to be changed.
         if (oldPart == null || oldPart == prevPartition) {
+            // 获取到可用的分区
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (availablePartitions.size() < 1) {
                 Integer random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
+                // 可用分区为0 随机值对默认分区取模
                 newPart = random % partitions.size();
             } else if (availablePartitions.size() == 1) {
+                // 可用分区为1 直接获取可用分区分区号
                 newPart = availablePartitions.get(0).partition();
             } else {
                 while (newPart == null || newPart.equals(oldPart)) {
                     Integer random = Utils.toPositive(ThreadLocalRandom.current().nextInt());
+                    // 随机值和可用分区取模 获取分区号
                     newPart = availablePartitions.get(random % availablePartitions.size()).partition();
                 }
             }

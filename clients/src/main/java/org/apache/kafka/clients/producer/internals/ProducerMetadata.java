@@ -66,6 +66,7 @@ public class ProducerMetadata extends Metadata {
 
     public synchronized void add(String topic, long nowMs) {
         Objects.requireNonNull(topic, "topic cannot be null");
+        // 如果该topic是新topic的话，说明需要更新needPartialUpdate 等待Sender更新
         if (topics.put(topic, nowMs + metadataIdleMs) == null) {
             newTopics.add(topic);
             requestUpdateForNewTopics();
@@ -116,6 +117,7 @@ public class ProducerMetadata extends Metadata {
     public synchronized void awaitUpdate(final int lastVersion, final long timeoutMs) throws InterruptedException {
         long currentTimeMs = time.milliseconds();
         long deadlineMs = currentTimeMs + timeoutMs < 0 ? Long.MAX_VALUE : currentTimeMs + timeoutMs;
+        // 调用wait方法阻塞 直到被sender线程唤醒 并且metadata版本更新才返回
         time.waitObject(this, () -> {
             // Throw fatal exceptions, if there are any. Recoverable topic errors will be handled by the caller.
             maybeThrowFatalException();
