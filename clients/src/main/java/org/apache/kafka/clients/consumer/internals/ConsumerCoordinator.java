@@ -467,8 +467,10 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     public boolean poll(Timer timer, boolean waitForJoinGroup) {
         maybeUpdateSubscriptionMetadata();
 
+        // 执行已完成offset提交请求的回调函数
         invokeCompletedOffsetCommitCallbacks();
 
+        // 是否是自动分配消费分区
         if (subscriptions.hasAutoAssignedPartitions()) {
             if (protocol == null) {
                 throw new IllegalStateException("User configured " + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG +
@@ -476,15 +478,19 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             }
             // Always update the heartbeat last poll time so that the heartbeat thread does not leave the
             // group proactively due to application inactivity even if (say) the coordinator cannot be found.
+            // 检查心跳线程的状态 并更新心跳时间
             pollHeartbeat(timer.currentTimeMs());
+            // 检查协调者
             if (coordinatorUnknown() && !ensureCoordinatorReady(timer)) {
                 return false;
             }
 
+            // 检查是否触发重平衡
             if (rejoinNeededOrPending()) {
                 // due to a race condition between the initial metadata fetch and the initial rebalance,
                 // we need to ensure that the metadata is fresh before joining initially. This ensures
                 // that we have matched the pattern against the cluster's topics at least once before joining.
+                // AUTO_PATTERN
                 if (subscriptions.hasPatternSubscription()) {
                     // For consumer group that uses pattern-based subscription, after a topic is created,
                     // any consumer that discovers the topic after metadata refresh can trigger rebalance
@@ -505,6 +511,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 }
 
                 // if not wait for join group, we would just use a timer of 0
+                // 触发重平衡
                 if (!ensureActiveGroup(waitForJoinGroup ? timer : time.timer(0L))) {
                     // since we may use a different timer in the callee, we'd still need
                     // to update the original timer's current time after the call
@@ -763,11 +770,13 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      */
     @Override
     public boolean rejoinNeededOrPending() {
+        // 检查是否用户手动分配分区
         if (!subscriptions.hasAutoAssignedPartitions())
             return false;
 
         // we need to rejoin if we performed the assignment and metadata has changed;
         // also for those owned-but-no-longer-existed partitions we should drop them as lost
+        // 如果执行了分配并且元数据已更改，则需要重新加入
         if (assignmentSnapshot != null && !assignmentSnapshot.matches(metadataSnapshot)) {
             log.info("Requesting to re-join the group and trigger rebalance since the assignment metadata has changed from {} to {}",
                     assignmentSnapshot, metadataSnapshot);
@@ -777,6 +786,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
 
         // we need to join if our subscription has changed since the last join
+        // 如果订阅发生了变化 触发重平衡
         if (joinedSubscription != null && !joinedSubscription.equals(subscriptions.subscription())) {
             log.info("Requesting to re-join the group and trigger rebalance since the subscription has changed from {} to {}",
                 joinedSubscription, subscriptions.subscription());

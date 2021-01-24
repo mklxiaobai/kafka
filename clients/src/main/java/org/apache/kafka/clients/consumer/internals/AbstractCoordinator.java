@@ -240,7 +240,9 @@ public abstract class AbstractCoordinator implements Closeable {
                 findCoordinatorException = null;
                 throw fatalException;
             }
+            // 查询协调者
             final RequestFuture<Void> future = lookupCoordinator();
+            // 执行网络IO
             client.poll(future, timer);
 
             if (!future.isDone()) {
@@ -268,11 +270,13 @@ public abstract class AbstractCoordinator implements Closeable {
     protected synchronized RequestFuture<Void> lookupCoordinator() {
         if (findCoordinatorFuture == null) {
             // find a node to ask about the coordinator
+            // 找到最少负载的节点
             Node node = this.client.leastLoadedNode();
             if (node == null) {
                 log.debug("No broker available to send FindCoordinator request");
                 return RequestFuture.noBrokersAvailable();
             } else {
+                // 发送请求
                 findCoordinatorFuture = sendFindCoordinatorRequest(node);
                 // remember the exception even after the future is cleared so that
                 // it can still be thrown by the ensureCoordinatorReady caller
@@ -317,6 +321,7 @@ public abstract class AbstractCoordinator implements Closeable {
      */
     protected synchronized void pollHeartbeat(long now) {
         if (heartbeatThread != null) {
+            // 检查心跳线程的状态
             if (heartbeatThread.hasFailed()) {
                 // set the heartbeat thread to null and raise an exception. If the user catches it,
                 // the next call to ensureActiveGroup() will spawn a new heartbeat thread.
@@ -325,6 +330,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 throw cause;
             }
             // Awake the heartbeat thread if needed
+            // 更新心跳时间
             if (heartbeat.shouldHeartbeat(now)) {
                 notify();
             }
@@ -359,10 +365,11 @@ public abstract class AbstractCoordinator implements Closeable {
     boolean ensureActiveGroup(final Timer timer) {
         // always ensure that the coordinator is ready because we may have been disconnected
         // when sending heartbeats and does not necessarily require us to rejoin the group.
+        // 确认Coordinator连接正常
         if (!ensureCoordinatorReady(timer)) {
             return false;
         }
-
+        // 确认开启心跳线程
         startHeartbeatThreadIfNeeded();
         return joinGroupIfNeeded(timer);
     }
@@ -833,13 +840,15 @@ public abstract class AbstractCoordinator implements Closeable {
                     // use MAX_VALUE - node.id as the coordinator id to allow separate connections
                     // for the coordinator in the underlying network client layer
                     int coordinatorConnectionId = Integer.MAX_VALUE - findCoordinatorResponse.data().nodeId();
-
+                    // 创建协调者节点
                     AbstractCoordinator.this.coordinator = new Node(
                             coordinatorConnectionId,
                             findCoordinatorResponse.data().host(),
                             findCoordinatorResponse.data().port());
                     log.info("Discovered group coordinator {}", coordinator);
+                    // 与协调者建立连接
                     client.tryConnect(coordinator);
+                    // 重置心跳
                     heartbeat.resetSessionTimeout();
                 }
                 future.complete(null);

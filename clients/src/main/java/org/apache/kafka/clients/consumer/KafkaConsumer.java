@@ -572,15 +572,20 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     private Logger log;
     private final String clientId;
     private final Optional<String> groupId;
+    // 消费者协调者
     private final ConsumerCoordinator coordinator;
     private final Deserializer<K> keyDeserializer;
     private final Deserializer<V> valueDeserializer;
+    // 拉取消息类
     private final Fetcher<K, V> fetcher;
     private final ConsumerInterceptors<K, V> interceptors;
 
     private final Time time;
+    // 网络客户端
     private final ConsumerNetworkClient client;
+    // 消费状态
     private final SubscriptionState subscriptions;
+    // 元数据
     private final ConsumerMetadata metadata;
     private final long retryBackoffMs;
     private final long requestTimeoutMs;
@@ -720,6 +725,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             this.subscriptions = new SubscriptionState(logContext, offsetResetStrategy);
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keyDeserializer,
                     valueDeserializer, metrics.reporters(), interceptorList);
+            // 初始化元数据
             this.metadata = new ConsumerMetadata(retryBackoffMs,
                     config.getLong(ConsumerConfig.METADATA_MAX_AGE_CONFIG),
                     !config.getBoolean(ConsumerConfig.EXCLUDE_INTERNAL_TOPICS_CONFIG),
@@ -738,6 +744,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             int heartbeatIntervalMs = config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG);
 
             ApiVersions apiVersions = new ApiVersions();
+            // 初始化NetworkClient
             NetworkClient netClient = new NetworkClient(
                     new Selector(config.getLong(ConsumerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), metrics, time, metricGrpPrefix, channelBuilder, logContext),
                     this.metadata,
@@ -960,6 +967,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 fetcher.clearBufferedDataForUnassignedTopics(topics);
                 log.info("Subscribed to topic(s): {}", Utils.join(topics, ", "));
                 if (this.subscriptions.subscribe(new HashSet<>(topics), listener))
+                    // 如果元数据不包含 更新元数据
                     metadata.requestUpdateForNewTopics();
             }
         } finally {
@@ -990,6 +998,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      */
     @Override
     public void subscribe(Collection<String> topics) {
+        // 创建一个空实现的重平衡监听器
         subscribe(topics, new NoOpConsumerRebalanceListener());
     }
 
@@ -1214,6 +1223,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         try {
             this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs());
 
+            // 如果没有订阅主题
             if (this.subscriptions.hasNoSubscriptionOrUserAssignment()) {
                 throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions");
             }
@@ -1223,13 +1233,14 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
                 if (includeMetadataInTimeout) {
                     // try to update assignment metadata BUT do not need to block on the timer for join group
+                    // 如有必要更新元数据 是否有必要重平衡
                     updateAssignmentMetadataIfNeeded(timer, false);
                 } else {
                     while (!updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE), true)) {
                         log.warn("Still waiting for metadata");
                     }
                 }
-
+                // 拉取消息
                 final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollForFetches(timer);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -1238,10 +1249,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     //
                     // NOTE: since the consumed position has already been updated, we must not allow
                     // wakeups or any other errors to be triggered prior to returning the fetched records.
+                    // 触发下一轮获取
                     if (fetcher.sendFetches() > 0 || client.hasPendingRequests()) {
                         client.transmitSends();
                     }
-
+                    // 执行消费拦截器
                     return this.interceptors.onConsume(new ConsumerRecords<>(records));
                 }
             } while (timer.notExpired());
@@ -1254,10 +1266,12 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     }
 
     boolean updateAssignmentMetadataIfNeeded(final Timer timer, final boolean waitForJoinGroup) {
+        // 检查coordinator
         if (coordinator != null && !coordinator.poll(timer, waitForJoinGroup)) {
             return false;
         }
 
+        // 更新服务端的offset
         return updateFetchPositions(timer);
     }
 
@@ -1265,16 +1279,19 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws KafkaException if the rebalance callback throws exception
      */
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollForFetches(Timer timer) {
+        // 计算本次拉取的超时时间
         long pollTimeout = coordinator == null ? timer.remainingMs() :
                 Math.min(coordinator.timeToNextPoll(timer.currentTimeMs()), timer.remainingMs());
 
         // if data is available already, return it immediately
+        // 查看是否已经存在拉取回来未加工的消息原始数据，有的话立即加工初始化后返回
         final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = fetcher.fetchedRecords();
         if (!records.isEmpty()) {
             return records;
         }
 
         // send any new fetches (won't resend pending fetches)
+        // 构建发送请求，保存在unsent集合中
         fetcher.sendFetches();
 
         // We do not want to be stuck blocking in poll if we are missing some positions
@@ -1289,13 +1306,15 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         log.trace("Polling for fetches with timeout {}", pollTimeout);
 
         Timer pollTimer = time.timer(pollTimeout);
+        // 执行网络IO
         client.poll(pollTimer, () -> {
             // since a fetch might be completed by the background thread, we need this poll condition
             // to ensure that we do not block unnecessarily in poll()
             return !fetcher.hasAvailableFetches();
         });
+        // 更新本次拉取的时间
         timer.update(pollTimer.currentTimeMs());
-
+        // 将从broker读到的数据返回
         return fetcher.fetchedRecords();
     }
 
@@ -2394,7 +2413,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     private boolean updateFetchPositions(final Timer timer) {
         // If any partitions have been truncated due to a leader change, we need to validate the offsets
         fetcher.validateOffsetsIfNeeded();
-
+        // 如果订阅关系中的所有分区都有有效的位移，则返回 true
         cachedSubscriptionHashAllFetchPositions = subscriptions.hasAllFetchPositions();
         if (cachedSubscriptionHashAllFetchPositions) return true;
 
@@ -2403,15 +2422,18 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         // coordinator lookup if there are partitions which have missing positions, so
         // a consumer with manually assigned partitions can avoid a coordinator dependence
         // by always ensuring that assigned partitions have an initial position.
+        // 从服务端拉取最新的offset提交信息
         if (coordinator != null && !coordinator.refreshCommittedOffsetsIfNeeded(timer)) return false;
 
         // If there are partitions still needing a position and a reset policy is defined,
         // request reset using the default policy. If no reset strategy is defined and there
         // are partitions with a missing position, then we will raise an exception.
+        // 订阅关系中还某些分区还是没有获取到有效的偏移量，则使用偏移量重置策略进行重置
         subscriptions.resetInitializingPositions();
 
         // Finally send an asynchronous request to lookup and update the positions of any
         // partitions which are awaiting reset.
+        // 发送一个异步请求去重置那些正等待重置位置的分区
         fetcher.resetOffsetsIfNeeded();
 
         return true;

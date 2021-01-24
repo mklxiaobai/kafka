@@ -474,7 +474,7 @@ public class ConsumerConfig extends AbstractConfig {
                                         VALUE_DESERIALIZER_CLASS_DOC)
                                 .define(REQUEST_TIMEOUT_MS_CONFIG,
                                         Type.INT,
-                                        30000,
+                                        3a'p000,
                                         atLeast(0),
                                         Importance.MEDIUM,
                                         REQUEST_TIMEOUT_MS_DOC)

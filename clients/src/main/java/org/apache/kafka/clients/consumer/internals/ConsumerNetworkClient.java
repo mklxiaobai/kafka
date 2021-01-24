@@ -58,6 +58,7 @@ public class ConsumerNetworkClient implements Closeable {
     // flag and the request completion queue below).
     private final Logger log;
     private final KafkaClient client;
+    // 待发送消息集合
     private final UnsentRequests unsent = new UnsentRequests();
     private final Metadata metadata;
     private final Time time;
@@ -128,6 +129,7 @@ public class ConsumerNetworkClient implements Closeable {
         RequestFutureCompletionHandler completionHandler = new RequestFutureCompletionHandler();
         ClientRequest clientRequest = client.newClientRequest(node.idString(), requestBuilder, now, true,
             requestTimeoutMs, completionHandler);
+        // 添加到unsent集合中
         unsent.put(node, clientRequest);
 
         // wakeup the client in case it is blocking in poll so that we can send the queued request
