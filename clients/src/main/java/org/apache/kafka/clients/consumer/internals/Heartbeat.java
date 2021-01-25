@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 /**
  * A helper class for managing the heartbeat to the coordinator
  */
+// 心跳辅助类 记录心跳时间间隔等信息
 public final class Heartbeat {
     private final int maxPollIntervalMs;
     private final GroupRebalanceConfig rebalanceConfig;

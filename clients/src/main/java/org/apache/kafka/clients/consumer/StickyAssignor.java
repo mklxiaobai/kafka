@@ -172,6 +172,8 @@ import org.apache.kafka.common.utils.CollectionUtils;
  * Note that you can leverage the {@link CooperativeStickyAssignor} so that only partitions which are being
  * reassigned to another consumer will be revoked. That is the preferred assignor for newer cluster. See
  * {@link ConsumerPartitionAssignor.RebalanceProtocol} for a detailed explanation of cooperative rebalancing.
+ *
+ * 具有粘性的分区器 尽量分配前后保持一致
  */
 public class StickyAssignor extends AbstractStickyAssignor {
 

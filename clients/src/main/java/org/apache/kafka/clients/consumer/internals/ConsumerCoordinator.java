@@ -567,6 +567,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
                                                         List<JoinGroupResponseData.JoinGroupResponseMember> allSubscriptions) {
+        // 查询分区分配器
         ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
@@ -577,11 +578,15 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         // collect all the owned partitions
         Map<String, List<TopicPartition>> ownedPartitions = new HashMap<>();
 
+        // 遍历所有最新的消费组成员
         for (JoinGroupResponseData.JoinGroupResponseMember memberSubscription : allSubscriptions) {
             Subscription subscription = ConsumerProtocol.deserializeSubscription(ByteBuffer.wrap(memberSubscription.metadata()));
             subscription.setGroupInstanceId(Optional.ofNullable(memberSubscription.groupInstanceId()));
+            // 成员订阅数据
             subscriptions.put(memberSubscription.memberId(), subscription);
+            // 组内成员所有订阅
             allSubscribedTopics.addAll(subscription.topics());
+            // 成员订阅的主题分区
             ownedPartitions.put(memberSubscription.memberId(), subscription.ownedPartitions());
         }
 
@@ -593,6 +598,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         log.debug("Performing assignment using strategy {} with subscriptions {}", assignor.name(), subscriptions);
 
+        // 调用分区分配器 分配每个组成员订阅的主题分区
         Map<String, Assignment> assignments = assignor.assign(metadata.fetch(), new GroupSubscription(subscriptions)).groupAssignment();
 
         if (protocol == RebalanceProtocol.COOPERATIVE) {
@@ -628,6 +634,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             updateGroupSubscription(allSubscribedTopics);
         }
 
+        // 更新分配后元数据快照
         assignmentSnapshot = metadataSnapshot;
 
         log.info("Finished assignment for group at generation {}: {}", generation().generationId, assignments);
@@ -680,6 +687,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     protected void onJoinPrepare(int generation, String memberId) {
         log.debug("Executing onJoinPrepare with generation {} and memberId {}", generation, memberId);
         // commit offsets prior to rebalance if auto-commit enabled
+        // 如果开启自动提交位移 则提交
         maybeAutoCommitOffsetsSync(time.timer(rebalanceConfig.rebalanceTimeoutMs));
 
         // the generation / member-id can possibly be reset by the heartbeat thread
@@ -1001,6 +1009,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
      *         the coordinator
      */
     public boolean commitOffsetsSync(Map<TopicPartition, OffsetAndMetadata> offsets, Timer timer) {
+        // 执行提交位移的回调
         invokeCompletedOffsetCommitCallbacks();
 
         if (offsets.isEmpty())
@@ -1011,12 +1020,14 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 return false;
             }
 
+            // 创建提交位移的请求
             RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
             client.poll(future, timer);
 
             // We may have had in-flight offset commits when the synchronous commit began. If so, ensure that
             // the corresponding callbacks are invoked prior to returning in order to preserve the order that
             // the offset commits were applied.
+            // 执行完成回调
             invokeCompletedOffsetCommitCallbacks();
 
             if (future.succeeded()) {
@@ -1065,9 +1076,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     private void maybeAutoCommitOffsetsSync(Timer timer) {
         if (autoCommitEnabled) {
+            // 获取所有订阅的主题分区的位移和元数据
             Map<TopicPartition, OffsetAndMetadata> allConsumedOffsets = subscriptions.allConsumed();
             try {
                 log.debug("Sending synchronous auto-commit of offsets {}", allConsumedOffsets);
+                // 同步提交位移
                 if (!commitOffsetsSync(allConsumedOffsets, timer))
                     log.debug("Auto-commit of offsets {} timed out before completion", allConsumedOffsets);
             } catch (WakeupException | InterruptException e) {
@@ -1155,6 +1168,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             generation = Generation.NO_GENERATION;
         }
 
+        // 创建请求
         OffsetCommitRequest.Builder builder = new OffsetCommitRequest.Builder(
                 new OffsetCommitRequestData()
                         .setGroupId(this.rebalanceConfig.groupId)
@@ -1191,6 +1205,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                     long offset = offsetAndMetadata.offset();
 
                     Errors error = Errors.forCode(partition.errorCode());
+                    // 没有异常说明提交成功
                     if (error == Errors.NONE) {
                         log.debug("Committed offset {} for partition {}", offset, tp);
                     } else {

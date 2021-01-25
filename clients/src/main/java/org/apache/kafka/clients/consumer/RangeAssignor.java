@@ -63,6 +63,7 @@ import java.util.Map;
  * <li><code>I0: [t0p0, t0p1, t1p0, t1p1]</code>
  * <li><code>I1: [t0p2, t1p2]</code>
  * </ul>
+ * 按范围分配的分区器
  */
 public class RangeAssignor extends AbstractPartitionAssignor {
 

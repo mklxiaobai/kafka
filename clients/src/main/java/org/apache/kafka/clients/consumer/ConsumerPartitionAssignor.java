@@ -37,6 +37,8 @@ import org.apache.kafka.common.TopicPartition;
  * assignment decisions. For this, you can override {@link #subscriptionUserData(Set)} and provide custom
  * userData in the returned Subscription. For example, to have a rack-aware assignor, an implementation
  * can use this user data to forward the rackId belonging to each member.
+ *
+ * 分区分配器
  */
 public interface ConsumerPartitionAssignor {
 

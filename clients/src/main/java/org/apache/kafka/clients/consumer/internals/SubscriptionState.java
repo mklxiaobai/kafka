@@ -93,6 +93,7 @@ public class SubscriptionState {
     private Set<String> groupSubscription;
 
     /* the partitions that are currently assigned, note that the order of partition matters (see FetchBuilder for more details) */
+    // 记录每个TopicPartition的消费状态
     private final PartitionStates<TopicPartitionState> assignment;
 
     /* Default offset reset strategy */
@@ -185,6 +186,7 @@ public class SubscriptionState {
         return changeSubscription(topics);
     }
 
+    // 消费组成员保存自己的订阅
     private boolean changeSubscription(Set<String> topicsToSubscribe) {
         if (subscription.equals(topicsToSubscribe))
             return false;
@@ -200,6 +202,7 @@ public class SubscriptionState {
      * @param topics All topics from the group subscription
      * @return true if the group subscription contains topics which are not part of the local subscription
      */
+    // 消费组Leader用来保存整个消费组的订阅
     synchronized boolean groupSubscribe(Collection<String> topics) {
         if (!hasAutoAssignedPartitions())
             throw new IllegalStateException(SUBSCRIPTION_EXCEPTION_MESSAGE);
@@ -743,8 +746,10 @@ public class SubscriptionState {
     private static class TopicPartitionState {
 
         private FetchState fetchState;
+        // 下一次要拉取的位移
         private FetchPosition position; // last consumed position
 
+        // 高水位
         private Long highWatermark; // the high watermark from last fetch
         private Long logStartOffset; // the log start offset
         private Long lastStableOffset;

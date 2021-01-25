@@ -254,6 +254,7 @@ public class ConsumerNetworkClient implements Closeable {
             handlePendingDisconnects();
 
             // send all the requests we can send now
+            // 从unsent从获取请求 准备发送
             long pollDelayMs = trySend(timer.currentTimeMs());
 
             // check whether the poll is still needed by the caller. Note that if the expected completion
@@ -264,6 +265,7 @@ public class ConsumerNetworkClient implements Closeable {
                 long pollTimeout = Math.min(timer.remainingMs(), pollDelayMs);
                 if (client.inFlightRequestCount() == 0)
                     pollTimeout = Math.min(pollTimeout, retryBackoffMs);
+                // 执行网络IO
                 client.poll(pollTimeout, timer.currentTimeMs());
             } else {
                 client.poll(0, timer.currentTimeMs());
@@ -273,10 +275,12 @@ public class ConsumerNetworkClient implements Closeable {
             // handle any disconnects by failing the active requests. note that disconnects must
             // be checked immediately following poll since any subsequent call to client.ready()
             // will reset the disconnect status
+            // 检查连接状态
             checkDisconnects(timer.currentTimeMs());
             if (!disableWakeup) {
                 // trigger wakeups after checking for disconnects so that the callbacks will be ready
                 // to be fired on the next call to poll()
+                // 检查是否被中断
                 maybeTriggerWakeup();
             }
             // throw InterruptException if this thread is interrupted
@@ -284,9 +288,11 @@ public class ConsumerNetworkClient implements Closeable {
 
             // try again to send requests since buffer space may have been
             // cleared or a connect finished in the poll
+            // 重试发送请求，因为缓冲区空间可能已被清除，或者轮询中的连接已完成
             trySend(timer.currentTimeMs());
 
             // fail requests that couldn't be sent if they have expired
+            // 处理超时请求
             failExpiredRequests(timer.currentTimeMs());
 
             // clean unsent requests collection to keep the map from growing indefinitely
@@ -407,10 +413,12 @@ public class ConsumerNetworkClient implements Closeable {
     private void firePendingCompletedRequests() {
         boolean completedRequestsFired = false;
         for (;;) {
+            // 获取完成处理器
             RequestFutureCompletionHandler completionHandler = pendingCompletion.poll();
             if (completionHandler == null)
                 break;
 
+            // 执行回调
             completionHandler.fireCompletion();
             completedRequestsFired = true;
         }
@@ -490,6 +498,7 @@ public class ConsumerNetworkClient implements Closeable {
         long pollDelayMs = maxPollTimeoutMs;
 
         // send any requests that can be sent now
+        // 遍历unsent中等待发送的请求 调用NetworkClient的send方法传入socketChannel中
         for (Node node : unsent.nodes()) {
             Iterator<ClientRequest> iterator = unsent.requestIterator(node);
             if (iterator.hasNext())
