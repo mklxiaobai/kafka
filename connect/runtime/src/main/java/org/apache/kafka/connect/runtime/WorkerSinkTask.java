@@ -193,6 +193,7 @@ class WorkerSinkTask extends WorkerTask {
 
     @Override
     public void execute() {
+        // 开始任务
         initializeAndStart();
         // Make sure any uncommitted data has been committed and the task has
         // a chance to clean up its state
@@ -213,6 +214,7 @@ class WorkerSinkTask extends WorkerTask {
 
             // Maybe commit
             if (!committing && (context.isCommitRequested() || now >= nextCommit)) {
+                // 提交offset
                 commitOffsets(now, false);
                 nextCommit = now + offsetCommitIntervalMs;
                 context.clearCommitRequest();

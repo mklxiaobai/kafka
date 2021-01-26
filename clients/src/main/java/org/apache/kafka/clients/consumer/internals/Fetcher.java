@@ -294,7 +294,7 @@ public class Fetcher<K, V> implements Closeable {
                             if (!handler.handleResponse(response)) {
                                 return;
                             }
-                            // 拿到响应的主题分区结婚
+                            // 拿到响应的主题分区结果
                             Set<TopicPartition> partitions = new HashSet<>(response.responseData().keySet());
                             FetchResponseMetricAggregator metricAggregator = new FetchResponseMetricAggregator(sensors, partitions);
 

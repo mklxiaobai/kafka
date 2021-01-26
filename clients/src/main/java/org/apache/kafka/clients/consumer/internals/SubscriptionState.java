@@ -85,11 +85,13 @@ public class SubscriptionState {
     private Pattern subscribedPattern;
 
     /* the list of topics the user has requested */
+    // 自身订阅的主题
     private Set<String> subscription;
 
     /* The list of topics the group has subscribed to. This may include some topics which are not part
      * of `subscription` for the leader of a group since it is responsible for detecting metadata changes
      * which require a group rebalance. */
+    // 整个消费组的订阅主题 只针对Leader有用
     private Set<String> groupSubscription;
 
     /* the partitions that are currently assigned, note that the order of partition matters (see FetchBuilder for more details) */

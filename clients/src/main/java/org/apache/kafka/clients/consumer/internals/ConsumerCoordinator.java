@@ -99,6 +99,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     // this collection must be thread-safe because it is modified from the response handler
     // of offset commit requests, which may be invoked from the heartbeat thread
+    // 已完成的提交
     private final ConcurrentLinkedQueue<OffsetCommitCompletion> completedOffsetCommits;
 
     private boolean isLeader = false;
@@ -349,9 +350,11 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         log.debug("Executing onJoinComplete with generation {} and memberId {}", generation, memberId);
 
         // Only the leader is responsible for monitoring for metadata changes (i.e. partition changes)
+        // 只有领导者负责监视元数据更改（即分区更改）
         if (!isLeader)
             assignmentSnapshot = null;
 
+        // 找到分区分配器
         ConsumerPartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
@@ -368,15 +371,18 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 "it is possible that the leader's assign function is buggy and did not return any assignment for this member, " +
                 "or because static member is configured and the protocol is buggy hence did not get the assignment for this member");
 
+        // 反序列化
         Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
 
         Set<TopicPartition> assignedPartitions = new HashSet<>(assignment.partitions());
 
+        // 检查分配到的主题和订阅的主题是否匹配
         if (!subscriptions.checkAssignmentMatchedSubscription(assignedPartitions)) {
             log.warn("We received an assignment {} that doesn't match our current subscription {}; it is likely " +
                 "that the subscription has changed since we joined the group. Will try re-join the group with current subscription",
                 assignment.partitions(), subscriptions.prettyString());
 
+            // 如果不匹配 再次重平衡
             requestRejoin();
 
             return;
@@ -386,6 +392,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         Set<TopicPartition> addedPartitions = new HashSet<>(assignedPartitions);
         addedPartitions.removeAll(ownedPartitions);
 
+        // 如果重平衡协议是COOPERATIVE
         if (protocol == RebalanceProtocol.COOPERATIVE) {
             Set<TopicPartition> revokedPartitions = new HashSet<>(ownedPartitions);
             revokedPartitions.removeAll(assignedPartitions);
@@ -415,18 +422,24 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         // The leader may have assigned partitions which match our subscription pattern, but which
         // were not explicitly requested, so we update the joined subscription here.
+        // 如果是正则表达式方式订阅
         maybeUpdateJoinedSubscription(assignedPartitions);
 
         // Catch any exception here to make sure we could complete the user callback.
+        // 执行分区器的执行后回调
+        // 对于StickyAssignor 需要保存一份分区快照
         firstException.compareAndSet(null, invokeOnAssignment(assignor, assignment));
 
         // Reschedule the auto commit starting from now
+        // 开启自动提交任务
         if (autoCommitEnabled)
             this.nextAutoCommitTimer.updateAndReset(autoCommitIntervalMs);
 
+        // 根据响应变更订阅的分区
         subscriptions.assignFromSubscribed(assignedPartitions);
 
         // Add partitions that were not previously owned but are now assigned
+        // 执行ConsumerRebalanceListener回调
         firstException.compareAndSet(null, invokePartitionsAssigned(addedPartitions));
 
         if (firstException.get() != null) {
@@ -936,6 +949,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
     public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
+        // 执行拉取完成回调
         invokeCompletedOffsetCommitCallbacks();
 
         if (!coordinatorUnknown()) {
@@ -972,6 +986,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     }
 
     private void doCommitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
+        // 创建OffsetCommit请求
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
         final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
         future.addListener(new RequestFutureListener<Void>() {
@@ -1116,6 +1131,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         if (offsets.isEmpty())
             return RequestFuture.voidSuccess();
 
+        // 找到协调者
         Node coordinator = checkAndGetCoordinator();
         if (coordinator == null)
             return RequestFuture.coordinatorNotAvailable();

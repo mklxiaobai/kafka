@@ -459,6 +459,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     stateSnapshot = this.state;
                 }
 
+                // 检查成员状态
                 if (!generationSnapshot.equals(Generation.NO_GENERATION) && stateSnapshot == MemberState.STABLE) {
                     // Duplicate the buffer in case `onJoinComplete` does not complete and needs to be retried.
                     ByteBuffer memberAssignment = future.value().duplicate();
@@ -613,6 +614,7 @@ public abstract class AbstractCoordinator implements Closeable {
                             if (joinResponse.isLeader()) {
                                 onJoinLeader(joinResponse).chain(future);
                             } else {
+                                // 如果当前消费者时Follower
                                 onJoinFollower().chain(future);
                             }
                         }
@@ -683,6 +685,7 @@ public abstract class AbstractCoordinator implements Closeable {
 
     private RequestFuture<ByteBuffer> onJoinFollower() {
         // send follower's sync group with an empty assignment
+        // 创建SyncGroupRequest 拉取自己的分区订阅
         SyncGroupRequest.Builder requestBuilder =
                 new SyncGroupRequest.Builder(
                         new SyncGroupRequestData()
